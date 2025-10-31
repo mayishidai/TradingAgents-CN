@@ -1,4 +1,4 @@
-name: Upstream Sync
+name: 自动更新
 
 permissions:
   contents: write
