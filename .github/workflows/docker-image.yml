@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: birdxs/tradingagents-cn
+  IMAGE_NAME: abczhou/tradingagents-cn
 
 jobs:
   build:
