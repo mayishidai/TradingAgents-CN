@@ -1,4 +1,4 @@
-name: Build Multi-Arch Docker Image
+name: Docker构建
 
 on:
   workflow_dispatch:
