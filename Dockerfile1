@@ -50,7 +50,7 @@ COPY requirements.txt .
 
 RUN set -e; \
     echo "Installing from https://pypi.org/simple"; \
-    pip install -r requirements.txt -i https://pypi.org/simple
+    pip install --no-cache-dir -r requirements.txt -i https://pypi.org/simple
 
 # 复制日志配置文件
 COPY config/ ./config/
