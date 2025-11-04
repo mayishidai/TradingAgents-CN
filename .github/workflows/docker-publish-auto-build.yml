@@ -1,154 +1,165 @@
-name: Docker Build & Publish
+name: Docker Publish to Docker Hub
 
 on:
-  # 4. 有更新即自动构建
   push:
-    branches: ["**"]          # 所有分支
-    tags: ["v*"]
+    branches: [main, master, develop]
+    tags: ['v*']
   pull_request:
-    branches: [main, develop]
-  # 1. 手动构建 + 动态获取所有分支
+    branches: [main, master, develop]
   workflow_dispatch:
     inputs:
-      latest_target:
-        description: "Which branch should get the 'latest' tag"
+      build_version:
+        description: '构建版本 (例如: latest, v1.0.0)'
         required: true
-        default: "auto"
-        type: choice
-        options: ["auto"]   # 运行时通过接口把全量分支插进来
-
-env:
-  DOCKERHUB_NAMESPACE: ${{ secrets.DOCKERHUB_USERNAME }}
-  # 2. yml 里配置自动 latest 规则（go 风格正则）
-  AUTO_LATEST_REGEX: "^refs/heads/main$|^refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        default: 'latest'
+      skip_tests:
+        description: '跳过测试'
+        type: boolean
+        default: false
 
 jobs:
-  # --------------  动态生成下拉框  --------------
-  generate-inputs:
+  test:
+    if: ${{ github.event_name == 'pull_request' || github.event.inputs.skip_tests == false }}
     runs-on: ubuntu-latest
-    outputs:
-      latest-options: ${{ steps.branches.outputs.list }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Collect all branches
-        id: branches
-        run: |
-          # 获取远程所有分支名，去掉 origin/ 前缀，拼成 JSON 数组字符串
-          mapfile -t BRANCHES < <(git ls-remote --heads origin | awk '{print $2}' | sed 's|refs/heads/||' | sort -u)
-          JSON=$(printf '"%s",' "${BRANCHES[@]}")
-          JSON="[${JSON%,}]"   # 去掉末尾逗号
-          echo "list=$JSON" >> $GITHUB_OUTPUT
-
-  # --------------  真正构建  --------------
-  build:
-    needs: generate-inputs
-    runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
-    strategy:
-      matrix:
-        include:
-          - img: tradingagents-backend
-            dockerfile: ./Dockerfile.backend
-          - img: tradingagents-frontend
-            dockerfile: ./Dockerfile.frontend
-    steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - name: Run tests
+        run: |
+          echo "运行测试套件..."
+          # 这里添加您的测试命令
+          # 例如: npm test, pytest, 等
+
+  build-and-push:
+    needs: test
+    if: ${{ github.event_name != 'pull_request' || github.event.inputs.skip_tests == true }}
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Generate vars
-        id: vars
+      - name: Get build timestamp
+        id: timestamp
         run: |
-          echo "BUILD_DATE=$(date -u +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
-          echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
-          # 当前分支名（push 时）
-          echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+          echo "build_time=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+          echo "build_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
 
-      # 决定 latest 及是否打「分支-时间」
-      - name: Decide flags
-        id: flag
-        run: |
-          # 手动触发
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            SEL="${{ github.event.inputs.latest_target }}"
-            if [[ "$SEL" != "auto" ]]; then
-              [[ "$GITHUB_REF" == "refs/heads/$SEL" ]] && IS_LATEST=true || IS_LATEST=false
-            else
-              IS_LATEST=$(echo "$GITHUB_REF" | grep -P '${{ env.AUTO_LATEST_REGEX }}' && echo true || echo false)
-            fi
-          else
-            # 自动触发
-            IS_LATEST=$(echo "$GITHUB_REF" | grep -P '${{ env.AUTO_LATEST_REGEX }}' && echo true || echo false)
-          fi
-          # 任何分支都启用「分支-时间」
-          BRANCH_TIME=false
-          [[ "$GITHUB_REF" == refs/heads/* ]] && BRANCH_TIME=true
-          echo "IS_LATEST=$IS_LATEST" >> $GITHUB_OUTPUT
-          echo "BRANCH_TIME=$BRANCH_TIME" >> $GITHUB_OUTPUT
-
-      # 生成元数据
-      - name: Docker meta
-        id: meta
+      - name: Extract metadata for backend
+        id: meta-backend
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKERHUB_NAMESPACE }}/${{ matrix.img }}
-          flavor: |
-            latest=false
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-backend
           tags: |
-            type=ref,event=branch
             type=ref,event=tag
+            type=raw,value=latest
+            type=raw,value=${{ github.event.inputs.build_version || 'latest' }}
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ steps.flag.outputs.IS_LATEST }}
-            # 3. 分支-构建时间
-            type=raw,value=${{ steps.vars.outputs.BRANCH_NAME }}-${{ steps.vars.outputs.BUILD_DATE }},enable=${{ steps.flag.outputs.BRANCH_TIME }}
-            # 统一日期+sha
-            type=raw,value=build-${{ steps.vars.outputs.BUILD_DATE }}-${{ steps.vars.outputs.SHORT_SHA }}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=build-${{ steps.timestamp.outputs.build_date }}
+          labels: |
+            org.opencontainers.image.created=${{ steps.timestamp.outputs.build_time }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
-      - name: Build & push
+      - name: Build and push backend image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: ./Dockerfile.backend
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          build-args: |
+            BUILD_TIME=${{ steps.timestamp.outputs.build_time }}
+            BUILD_VERSION=${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: |
-            COMMIT_SHA=${{ github.sha }}
-            BUILD_DATE=${{ steps.vars.outputs.BUILD_DATE }}
 
-  # --------------  PR 仅构建不推送  --------------
-  pr-build:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.pull_request.merged != true
-    strategy:
-      matrix:
-        include:
-          - img: tradingagents-backend
-            dockerfile: ./Dockerfile.backend
-          - img: tradingagents-frontend
-            dockerfile: ./Dockerfile.frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v5
+      - name: Extract metadata for frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-frontend
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest
+            type=raw,value=${{ github.event.inputs.build_version || 'latest' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=build-${{ steps.timestamp.outputs.build_date }}
+          labels: |
+            org.opencontainers.image.created=${{ steps.timestamp.outputs.build_time }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64
-          push: false
-          tags: ${{ matrix.img }}:pr-${{ github.event.number }}
+          file: ./Dockerfile.frontend
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          build-args: |
+            BUILD_TIME=${{ steps.timestamp.outputs.build_time }}
+            BUILD_VERSION=${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Summary
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          echo "## Docker Images Published 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 构建信息" >> $GITHUB_STEP_SUMMARY
+          echo "- **构建时间**: ${{ steps.timestamp.outputs.build_time }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **提交版本**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **触发方式**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Multi-Architecture Support" >> $GITHUB_STEP_SUMMARY
+          echo "✅ linux/amd64 (Intel/AMD x86_64)" >> $GITHUB_STEP_SUMMARY
+          echo "✅ linux/arm64 (Apple Silicon, Raspberry Pi, AWS Graviton)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Backend Image" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta-backend.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Frontend Image" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta-frontend.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Usage" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "# Pull images (Docker will automatically select the correct architecture)" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-backend:latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-frontend:latest" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Run with docker-compose" >> $GITHUB_STEP_SUMMARY
+          echo "docker-compose -f docker-compose.hub.yml up -d" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Verify Architecture" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "docker buildx imagetools inspect ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-backend:latest" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
