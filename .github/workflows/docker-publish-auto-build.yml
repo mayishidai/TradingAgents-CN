@@ -17,6 +17,12 @@ on:
       #   type: boolean
       #   default: false
 
+# 环境变量
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_FRONTEND: tradingagents-cn-frontend
+  IMAGE_NAME_BACKEND: tradingagents-cn-backend
+
 jobs:
   test:
     if: ${{ github.event_name == 'pull_request' || github.event.inputs.skip_tests == false }}
@@ -66,7 +72,7 @@ jobs:
         id: meta-backend
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-backend
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/{{ env.IMAGE_NAME_BACKEND }}
           tags: |
             type=ref,event=tag
             type=raw,value=latest
@@ -97,7 +103,7 @@ jobs:
         id: meta-frontend
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-frontend
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/{{ env.IMAGE_NAME_FRONTEND }}
           tags: |
             type=ref,event=tag
             type=raw,value=latest
@@ -151,8 +157,8 @@ jobs:
           echo "### Usage" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
           echo "# Pull images (Docker will automatically select the correct architecture)" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-backend:latest" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-frontend:latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/{{ env.IMAGE_NAME_BACKEND }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/{{ env.IMAGE_NAME_FRONTEND }}:latest" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Run with docker-compose" >> $GITHUB_STEP_SUMMARY
           echo "docker-compose -f docker-compose.hub.yml up -d" >> $GITHUB_STEP_SUMMARY
@@ -160,6 +166,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Verify Architecture" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "docker buildx imagetools inspect ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-backend:latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker buildx imagetools inspect ${{ secrets.DOCKERHUB_USERNAME }}/{{ env.IMAGE_NAME_FRONTEND }}:latest" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
