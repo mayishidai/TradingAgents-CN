@@ -2,20 +2,20 @@ name: Docker Publish to Docker Hub
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master, develop, 'v*-preview']
     tags: ['v*']
   pull_request:
-    branches: [main, master, develop]
+    branches: [main, master, develop, 'v*-preview']
   workflow_dispatch:
     inputs:
       build_version:
         description: '构建版本 (例如: latest, v1.0.0)'
         required: true
         default: 'latest'
-      skip_tests:
-        description: '跳过测试'
-        type: boolean
-        default: false
+      # skip_tests:
+      #   description: '跳过测试'
+      #   type: boolean
+      #   default: false
 
 jobs:
   test:
