@@ -27,6 +27,7 @@ env:
 
 jobs:
   test:
+    # 简化测试条件，在 PR 时运行测试
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
@@ -39,8 +40,11 @@ jobs:
           # 这里添加您的测试命令
 
   build-and-push:
-    needs: test
-    if: ${{ github.event_name != 'pull_request' }}
+    # 修复构建条件：在推送、标签或手动触发时运行
+    if: |
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     
     steps:
@@ -72,10 +76,25 @@ jobs:
           echo "build_time=${BUILD_TIME_MS}" >> $GITHUB_OUTPUT
           echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
           echo "unique_suffix=${UNIQUE_SUFFIX}" >> $GITHUB_OUTPUT
+          echo "Build timestamp: ${BUILD_TIME_MS}"
+          echo "Unique suffix: ${UNIQUE_SUFFIX}"
 
-      # Backend 镜像构建和推送 - 多个仓库
-      - name: Extract metadata for backend (primary)
-        id: meta-backend-primary
+      # 判断是否为预览版本
+      - name: Determine if preview build
+        id: preview
+        run: |
+          if [[ "${{ github.ref }}" == *"preview"* ]] || [[ "${{ github.event.inputs.build_version }}" == *"preview"* ]]; then
+            echo "is_preview=true" >> $GITHUB_OUTPUT
+            echo "build_type=preview" >> $GITHUB_OUTPUT
+          else
+            echo "is_preview=false" >> $GITHUB_OUTPUT
+            echo "build_type=stable" >> $GITHUB_OUTPUT
+          fi
+
+      # Backend 镜像构建和推送 - 稳定版本
+      - name: Extract metadata for backend (stable)
+        if: steps.preview.outputs.is_preview == 'false'
+        id: meta-backend-stable
         uses: docker/metadata-action@v5
         with:
           images: |
@@ -94,15 +113,36 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
 
-      - name: Build and push backend images to all repositories
+      # Backend 镜像构建和推送 - 预览版本
+      - name: Extract metadata for backend (preview)
+        if: steps.preview.outputs.is_preview == 'true'
+        id: meta-backend-preview
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_PREVIEW }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_CN_PREVIEW }}
+          tags: |
+            type=raw,value=preview
+            type=raw,value=preview-${{ steps.timestamp.outputs.build_date }}-${{ steps.timestamp.outputs.unique_suffix }}
+            type=raw,value=preview-sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.created=${{ steps.timestamp.outputs.build_time }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build and push backend images
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.backend
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta-backend-primary.outputs.tags }}
-          labels: ${{ steps.meta-backend-primary.outputs.labels }}
+          tags: |
+            ${{ steps.meta-backend-stable.outputs.tags }}
+            ${{ steps.meta-backend-preview.outputs.tags }}
+          labels: |
+            ${{ steps.meta-backend-stable.outputs.labels }}
+            ${{ steps.meta-backend-preview.outputs.labels }}
           build-args: |
             BUILD_TIME=${{ steps.timestamp.outputs.build_time }}
             BUILD_VERSION=${{ github.ref_name }}
@@ -110,9 +150,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Frontend 镜像构建和推送 - 多个仓库
-      - name: Extract metadata for frontend (primary)
-        id: meta-frontend-primary
+      # Frontend 镜像构建和推送 - 稳定版本
+      - name: Extract metadata for frontend (stable)
+        if: steps.preview.outputs.is_preview == 'false'
+        id: meta-frontend-stable
         uses: docker/metadata-action@v5
         with:
           images: |
@@ -131,57 +172,9 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
 
-      - name: Build and push frontend images to all repositories
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.frontend
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta-frontend-primary.outputs.tags }}
-          labels: ${{ steps.meta-frontend-primary.outputs.labels }}
-          build-args: |
-            BUILD_TIME=${{ steps.timestamp.outputs.build_time }}
-            BUILD_VERSION=${{ github.ref_name }}
-            GIT_COMMIT=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # 预览版本镜像（如果需要）
-      - name: Extract metadata for backend preview
-        if: ${{ contains(github.ref, 'preview') || github.event.inputs.build_version == 'preview' }}
-        id: meta-backend-preview
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_PREVIEW }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_CN_PREVIEW }}
-          tags: |
-            type=raw,value=preview
-            type=raw,value=preview-${{ steps.timestamp.outputs.build_date }}-${{ steps.timestamp.outputs.unique_suffix }}
-          labels: |
-            org.opencontainers.image.created=${{ steps.timestamp.outputs.build_time }}
-            org.opencontainers.image.revision=${{ github.sha }}
-
-      - name: Build and push backend preview images
-        if: ${{ contains(github.ref, 'preview') || github.event.inputs.build_version == 'preview' }}
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.backend
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta-backend-preview.outputs.tags }}
-          labels: ${{ steps.meta-backend-preview.outputs.labels }}
-          build-args: |
-            BUILD_TIME=${{ steps.timestamp.outputs.build_time }}
-            BUILD_VERSION=preview-${{ github.ref_name }}
-            GIT_COMMIT=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Extract metadata for frontend preview
-        if: ${{ contains(github.ref, 'preview') || github.event.inputs.build_version == 'preview' }}
+      # Frontend 镜像构建和推送 - 预览版本
+      - name: Extract metadata for frontend (preview)
+        if: steps.preview.outputs.is_preview == 'true'
         id: meta-frontend-preview
         uses: docker/metadata-action@v5
         with:
@@ -191,23 +184,27 @@ jobs:
           tags: |
             type=raw,value=preview
             type=raw,value=preview-${{ steps.timestamp.outputs.build_date }}-${{ steps.timestamp.outputs.unique_suffix }}
+            type=raw,value=preview-sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.created=${{ steps.timestamp.outputs.build_time }}
             org.opencontainers.image.revision=${{ github.sha }}
 
-      - name: Build and push frontend preview images
-        if: ${{ contains(github.ref, 'preview') || github.event.inputs.build_version == 'preview' }}
+      - name: Build and push frontend images
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.frontend
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta-frontend-preview.outputs.tags }}
-          labels: ${{ steps.meta-frontend-preview.outputs.labels }}
+          tags: |
+            ${{ steps.meta-frontend-stable.outputs.tags }}
+            ${{ steps.meta-frontend-preview.outputs.tags }}
+          labels: |
+            ${{ steps.meta-frontend-stable.outputs.labels }}
+            ${{ steps.meta-frontend-preview.outputs.labels }}
           build-args: |
             BUILD_TIME=${{ steps.timestamp.outputs.build_time }}
-            BUILD_VERSION=preview-${{ github.ref_name }}
+            BUILD_VERSION=${{ github.ref_name }}
             GIT_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -218,6 +215,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 构建信息" >> $GITHUB_STEP_SUMMARY
           echo "- **构建时间**: ${{ steps.timestamp.outputs.build_time }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **构建类型**: ${{ steps.preview.outputs.build_type }}" >> $GITHUB_STEP_SUMMARY
           echo "- **提交版本**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **触发方式**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **运行ID**: ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
@@ -226,44 +224,72 @@ jobs:
           echo "✅ linux/amd64 (Intel/AMD x86_64)" >> $GITHUB_STEP_SUMMARY
           echo "✅ linux/arm64 (Apple Silicon, Raspberry Pi, AWS Graviton)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Backend Images Published" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.meta-backend-primary.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Frontend Images Published" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.meta-frontend-primary.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ steps.preview.outputs.is_preview }}" == "true" ]]; then
+            echo "### Backend Preview Images Published" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.meta-backend-preview.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Frontend Preview Images Published" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.meta-frontend-preview.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Backend Stable Images Published" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.meta-backend-stable.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Frontend Stable Images Published" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.meta-frontend-stable.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+          
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 所有发布的镜像仓库" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "#### Backend 镜像推送到:" >> $GITHUB_STEP_SUMMARY
-          echo "- `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}`" >> $GITHUB_STEP_SUMMARY
-          echo "- `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_CN }}`" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ contains(github.ref, 'preview') || github.event.inputs.build_version == 'preview' }}" = "true" ]; then
+          
+          if [[ "${{ steps.preview.outputs.is_preview }}" == "true" ]]; then
+            echo "#### Backend 预览镜像推送到:" >> $GITHUB_STEP_SUMMARY
             echo "- `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_PREVIEW }}`" >> $GITHUB_STEP_SUMMARY
             echo "- `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_CN_PREVIEW }}`" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "#### Frontend 镜像推送到:" >> $GITHUB_STEP_SUMMARY
-          echo "- `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }}`" >> $GITHUB_STEP_SUMMARY
-          echo "- `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND_CN }}`" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ contains(github.ref, 'preview') || github.event.inputs.build_version == 'preview' }}" = "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "#### Frontend 预览镜像推送到:" >> $GITHUB_STEP_SUMMARY
             echo "- `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND_PREVIEW }}`" >> $GITHUB_STEP_SUMMARY
             echo "- `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND_CN_PREVIEW }}`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "#### Backend 稳定镜像推送到:" >> $GITHUB_STEP_SUMMARY
+            echo "- `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}`" >> $GITHUB_STEP_SUMMARY
+            echo "- `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_CN }}`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "#### Frontend 稳定镜像推送到:" >> $GITHUB_STEP_SUMMARY
+            echo "- `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }}`" >> $GITHUB_STEP_SUMMARY
+            echo "- `${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND_CN }}`" >> $GITHUB_STEP_SUMMARY
           fi
+          
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 唯一构建标签" >> $GITHUB_STEP_SUMMARY
-          echo "本次构建的唯一标签: **build-${{ steps.timestamp.outputs.build_date }}-${{ steps.timestamp.outputs.unique_suffix }}**" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.preview.outputs.is_preview }}" == "true" ]]; then
+            echo "本次构建的唯一标签: **preview-${{ steps.timestamp.outputs.build_date }}-${{ steps.timestamp.outputs.unique_suffix }}**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "本次构建的唯一标签: **build-${{ steps.timestamp.outputs.build_date }}-${{ steps.timestamp.outputs.unique_suffix }}**" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Usage Examples" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "# Pull from primary repository" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}:latest" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }}:latest" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# Pull from CN repository" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_CN }}:latest" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND_CN }}:latest" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY 
+          if [[ "${{ steps.preview.outputs.is_preview }}" == "true" ]]; then
+            echo "# Pull preview images" >> $GITHUB_STEP_SUMMARY
+            echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_PREVIEW }}:preview" >> $GITHUB_STEP_SUMMARY
+            echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND_PREVIEW }}:preview" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "# Pull stable images" >> $GITHUB_STEP_SUMMARY
+            echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND }}:latest" >> $GITHUB_STEP_SUMMARY
+            echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND }}:latest" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "# Pull from CN repository" >> $GITHUB_STEP_SUMMARY
+            echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_BACKEND_CN }}:latest" >> $GITHUB_STEP_SUMMARY
+            echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME_FRONTEND_CN }}:latest" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo '```' >> $GITHUB_STEP_SUMMARY
