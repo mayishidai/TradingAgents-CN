@@ -15,8 +15,10 @@ on:
 
 # 环境变量配置
 env:
-  # 统一使用同一个仓库名
-  DOCKER_REPOSITORY: ${{ github.repository }}
+  REGISTRY: ghcr.io
+  # 使用 GitHub 仓库名字
+  DOCKER_REPOSITORY: ${{ github.repository }}   # mayishidai/TradingAgents-CN
+  REPO_NAME : ${{ github.event.repository.name }}  #TradingAgents-CN
   # Docker Hub 用户名，将在步骤中从 secrets 获取
   DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
@@ -89,7 +91,7 @@ jobs:
       - name: Generate Docker tags
         id: tags
         run: |
-          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_REPOSITORY }}"
+          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${{ env.REPO_NAME }}"
           COMPONENT="${{ matrix.component }}"
           BRANCH_NAME="${{ steps.metadata.outputs.branch_name }}"
           BUILD_TIME_MS="${{ steps.metadata.outputs.build_time_ms }}"
@@ -128,13 +130,12 @@ jobs:
             TAGS+=("${FULL_REPO_NAME}:${COMPONENT}-${MANUAL_VERSION}")
           fi
           
-          # 输出标签列表
-          TAGS_JSON=$(printf '%s\n' "${TAGS[@]}" | jq -R . | jq -s .)
-          echo "tags=${TAGS_JSON}" >> $GITHUB_OUTPUT
-          
           # 输出逗号分隔的标签字符串用于构建
           TAGS_STRING=$(IFS=,; echo "${TAGS[*]}")
           echo "tags_string=${TAGS_STRING}" >> $GITHUB_OUTPUT
+          
+          # 输出第一个标签用于 metadata action
+          echo "first_tag=${TAGS[0]}" >> $GITHUB_OUTPUT
           
           echo "Generated tags for ${COMPONENT}:"
           printf '%s\n' "${TAGS[@]}"
@@ -143,11 +144,11 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_REPOSITORY }}
+          images: ${{ env.DOCKER_USERNAME }}/${{ env.REPO_NAME }}
           tags: |
-            type=raw,value=${{ fromJSON(steps.tags.outputs.tags)[0] }}
+            type=raw,value=${{ steps.tags.outputs.first_tag }}
           labels: |
-            org.opencontainers.image.created=${{ fromJSON(steps.tags.outputs.tags)[0] }}
+            org.opencontainers.image.created=${{ steps.metadata.outputs.build_time_ms }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
             com.github.component=${{ matrix.component }}
@@ -171,9 +172,12 @@ jobs:
       - name: Update summary for ${{ matrix.component }}
         if: matrix.component == 'backend'
         run: |
+          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${{ env.REPO_NAME }}"
+          
           echo "## Docker Images Published 🚀" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 构建信息" >> $GITHUB_STEP_SUMMARY
+          echo "- **仓库**: ${FULL_REPO_NAME}" >> $GITHUB_STEP_SUMMARY
           echo "- **构建时间**: ${{ steps.metadata.outputs.build_time_ms }}" >> $GITHUB_STEP_SUMMARY
           echo "- **分支**: ${{ steps.metadata.outputs.branch_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **构建类型**: ${{ steps.metadata.outputs.is_preview == 'true' && '预览版' || '稳定版' }}" >> $GITHUB_STEP_SUMMARY
@@ -187,14 +191,12 @@ jobs:
 
       - name: Add component summary
         run: |
+          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${{ env.REPO_NAME }}"
           COMPONENT="${{ matrix.component }}"
-          TAGS=(${{ steps.tags.outputs.tags_string }})
           
           echo "### ${COMPONENT^} Images Published" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          for tag in "${TAGS[@]}"; do
-            echo "$tag" >> $GITHUB_STEP_SUMMARY
-          done
+          echo "${{ steps.tags.outputs.tags_string }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
@@ -205,15 +207,17 @@ jobs:
     steps:
       - name: Complete summary
         run: |
+          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${{ env.REPO_NAME }}"
+          
           echo "### 使用示例" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
           echo "# 拉取最新镜像" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_REPOSITORY }}:frontend-latest" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_REPOSITORY }}:backend-latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${FULL_REPO_NAME}:frontend-latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${FULL_REPO_NAME}:backend-latest" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# 拉取特定版本的镜像" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_REPOSITORY }}:frontend-latest-preview" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_REPOSITORY }}:backend-main-latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${FULL_REPO_NAME}:frontend-latest-preview" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${FULL_REPO_NAME}:backend-main-latest" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "---" >> $GITHUB_STEP_SUMMARY
