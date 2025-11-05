@@ -1,91 +1,232 @@
-name: Docker自动构建
+name: Docker Build and Push
 
 on:
   push:
-    tags:
-      - 'v*'
-    branches: [ main, master ]
+    branches: [main, master, develop, 'v*-preview']
+    tags: ['v*']
+  pull_request:
+    branches: [main, master, develop, 'v*-preview']
   workflow_dispatch:
+    inputs:
+      build_version:
+        description: '构建版本 (例如: latest, v1.0.0)'
+        required: true
+        default: 'latest'
 
+# 环境变量配置
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: abczhou/tradingagents-cn
+  DOCKER_REPOSITORY: ${{ github.repository }}   # mayishidai/TradingAgents-CN
+  # 使用 GitHub 仓库名字并转换为小写
+  REPO_NAME: ${{ github.event.repository.name }}      #TradingAgents-CN
+  # Docker Hub 用户名
+  DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: read
-      packages: write
-
+  test:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Determine version
-        id: version
+      - name: Run tests
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION="manual-$(date +%Y%m%d%H%M%S)"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
-            VERSION=${VERSION#v}
-          else
-            BRANCH_NAME=${GITHUB_REF#refs/heads/}
-            BRANCH_NAME=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g')
-            SHORT_SHA=$(git rev-parse --short HEAD)
-            VERSION="${BRANCH_NAME}-${SHORT_SHA}"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "运行测试套件..."
+          # 这里添加您的测试命令
+
+  build-and-push:
+    if: |
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        component: [frontend, backend]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
         with:
-          driver: docker-container
-          buildkitd-flags: --debug
-          install: true
-
-      # 添加缓存配置
-      - name: Cache Docker layers
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
+          platforms: linux/amd64,linux/arm64
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v2
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up QEMU for multi-platform build
-        uses: docker/setup-qemu-action@v2
-        with:
-          platforms: arm64,amd64
-
-      - name: Build and push multi-arch image
+      - name: Get build metadata
+        id: metadata
         run: |
-          docker buildx build \
-            --platform linux/amd64,linux/arm64 \
-            -t ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} \
-            -t ${{ env.IMAGE_NAME }}:latest \
-            --cache-from type=local,src=/tmp/.buildx-cache \
-            --cache-to type=local,dest=/tmp/.buildx-cache-new \
-            --push \
-            --progress=plain \
-            -f ./Dockerfile1 .
-        
-        # 更新缓存
-      - name: Move cache
+          # 获取构建时间（毫秒级）
+          BUILD_TIME_MS=$(date -u +'%Y%m%d%H%M%S%3N')
+          echo "build_time_ms=${BUILD_TIME_MS}" >> $GITHUB_OUTPUT
+          
+          # 获取当前分支名（清理特殊字符）
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          BRANCH_NAME=${BRANCH_NAME//\//-}
+          echo "branch_name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+          
+          # 判断是否为预览分支
+          if [[ "$BRANCH_NAME" == *"preview"* ]] || [[ "${{ github.event.inputs.build_version }}" == *"preview"* ]]; then
+            echo "is_preview=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_preview=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Build time: ${BUILD_TIME_MS}"
+          echo "Branch: ${BRANCH_NAME}"
+
+      - name: Generate Docker tags
+        id: tags
         run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          # 将仓库名转换为小写
+          REPO_NAME_LOWER=$(echo "${{ env.REPO_NAME }}" | tr '[:upper:]' '[:lower:]')
+          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${REPO_NAME_LOWER}"
+          COMPONENT="${{ matrix.component }}"
+          BRANCH_NAME="${{ steps.metadata.outputs.branch_name }}"
+          BUILD_TIME_MS="${{ steps.metadata.outputs.build_time_ms }}"
+          IS_PREVIEW="${{ steps.metadata.outputs.is_preview }}"
+          
+          TAGS=()
+          
+          if [[ "$IS_PREVIEW" == "true" ]]; then
+            # 预览分支的标签规则
+            TAGS+=("${FULL_REPO_NAME}:${COMPONENT}-latest-${BRANCH_NAME}")
+            TAGS+=("${FULL_REPO_NAME}:${COMPONENT}-latest-${BRANCH_NAME}-${BUILD_TIME_MS}")
+            TAGS+=("${FULL_REPO_NAME}:${COMPONENT}-latest-preview")
+          else
+            # 主分支的标签规则
+            if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+              TAGS+=("${FULL_REPO_NAME}:${COMPONENT}-main-latest")
+              TAGS+=("${FULL_REPO_NAME}:${COMPONENT}-main-${BUILD_TIME_MS}")
+              TAGS+=("${FULL_REPO_NAME}:${COMPONENT}-latest")
+            else
+              # 其他稳定分支
+              TAGS+=("${FULL_REPO_NAME}:${COMPONENT}-latest-${BRANCH_NAME}")
+              TAGS+=("${FULL_REPO_NAME}:${COMPONENT}-latest-${BRANCH_NAME}-${BUILD_TIME_MS}")
+              TAGS+=("${FULL_REPO_NAME}:${COMPONENT}-latest")
+            fi
+          fi
+          
+          # 如果是标签推送，添加版本标签
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+            TAGS+=("${FULL_REPO_NAME}:${COMPONENT}-${VERSION}")
+          fi
+          
+          # 手动触发时使用输入的版本
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.build_version }}" != "latest" ]]; then
+            MANUAL_VERSION="${{ github.event.inputs.build_version }}"
+            TAGS+=("${FULL_REPO_NAME}:${COMPONENT}-${MANUAL_VERSION}")
+          fi
+          
+          # 输出逗号分隔的标签字符串用于构建
+          TAGS_STRING=$(IFS=,; echo "${TAGS[*]}")
+          echo "tags_string=${TAGS_STRING}" >> $GITHUB_OUTPUT
+          
+          # 输出第一个标签用于 metadata action
+          echo "first_tag=${TAGS[0]}" >> $GITHUB_OUTPUT
+          
+          # 输出小写的仓库名用于后续步骤
+          echo "repo_name_lower=${REPO_NAME_LOWER}" >> $GITHUB_OUTPUT
+          echo "full_repo_name=${FULL_REPO_NAME}" >> $GITHUB_OUTPUT
+          
+          echo "Generated tags for ${COMPONENT}:"
+          printf '%s\n' "${TAGS[@]}"
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.tags.outputs.full_repo_name }}
+          tags: |
+            type=raw,value=${{ steps.tags.outputs.first_tag }}
+          labels: |
+            org.opencontainers.image.created=${{ steps.metadata.outputs.build_time_ms }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            com.github.component=${{ matrix.component }}
+
+      - name: Build and push ${{ matrix.component }} image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.${{ matrix.component }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags_string }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_TIME=${{ steps.metadata.outputs.build_time_ms }}
+            BUILD_VERSION=${{ github.ref_name }}
+            GIT_COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Update summary for ${{ matrix.component }}
+        if: matrix.component == 'backend'
+        run: |
+          FULL_REPO_NAME="${{ steps.tags.outputs.full_repo_name }}"
+          
+          echo "## Docker Images Published 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 构建信息" >> $GITHUB_STEP_SUMMARY
+          echo "- **仓库**: ${FULL_REPO_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "- **构建时间**: ${{ steps.metadata.outputs.build_time_ms }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **分支**: ${{ steps.metadata.outputs.branch_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **构建类型**: ${{ steps.metadata.outputs.is_preview == 'true' && '预览版' || '稳定版' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **提交版本**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **触发方式**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Multi-Architecture Support" >> $GITHUB_STEP_SUMMARY
+          echo "✅ linux/amd64 (Intel/AMD x86_64)" >> $GITHUB_STEP_SUMMARY
+          echo "✅ linux/arm64 (Apple Silicon, Raspberry Pi, AWS Graviton)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Add component summary
+        run: |
+          FULL_REPO_NAME="${{ steps.tags.outputs.full_repo_name }}"
+          COMPONENT="${{ matrix.component }}"
+          
+          echo "### ${COMPONENT^} Images Published" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.tags.outputs.tags_string }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+  final-summary:
+    if: always() && needs.build-and-push.result != 'skipped'
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    steps:
+      - name: Complete summary
+        run: |
+          # 重新计算小写仓库名以确保一致性
+          REPO_NAME_LOWER=$(echo "${{ env.REPO_NAME }}" | tr '[:upper:]' '[:lower:]')
+          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${REPO_NAME_LOWER}"
+          
+          echo "### 使用示例" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "# 拉取最新镜像" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${FULL_REPO_NAME}:frontend-latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${FULL_REPO_NAME}:backend-latest" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 拉取特定版本的镜像" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${FULL_REPO_NAME}:frontend-latest-preview" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${FULL_REPO_NAME}:backend-main-latest" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*构建完成于: $(date -u +'%Y-%m-%d %H:%M:%S UTC')*" >> $GITHUB_STEP_SUMMARY
