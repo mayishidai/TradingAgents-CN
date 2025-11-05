@@ -1,4 +1,4 @@
-name: Docker Build and Push
+name: 自动构建Docker并提交
 
 on:
   push:
