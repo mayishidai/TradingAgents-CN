@@ -16,10 +16,10 @@ on:
 # 环境变量配置
 env:
   REGISTRY: ghcr.io
-  # 使用 GitHub 仓库名字
   DOCKER_REPOSITORY: ${{ github.repository }}   # mayishidai/TradingAgents-CN
-  REPO_NAME : ${{ github.event.repository.name }}  #TradingAgents-CN
-  # Docker Hub 用户名，将在步骤中从 secrets 获取
+  # 使用 GitHub 仓库名字并转换为小写
+  REPO_NAME: ${{ github.event.repository.name }}      #TradingAgents-CN
+  # Docker Hub 用户名
   DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
 jobs:
@@ -91,7 +91,9 @@ jobs:
       - name: Generate Docker tags
         id: tags
         run: |
-          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${{ env.REPO_NAME }}"
+          # 将仓库名转换为小写
+          REPO_NAME_LOWER=$(echo "${{ env.REPO_NAME }}" | tr '[:upper:]' '[:lower:]')
+          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${REPO_NAME_LOWER}"
           COMPONENT="${{ matrix.component }}"
           BRANCH_NAME="${{ steps.metadata.outputs.branch_name }}"
           BUILD_TIME_MS="${{ steps.metadata.outputs.build_time_ms }}"
@@ -137,6 +139,10 @@ jobs:
           # 输出第一个标签用于 metadata action
           echo "first_tag=${TAGS[0]}" >> $GITHUB_OUTPUT
           
+          # 输出小写的仓库名用于后续步骤
+          echo "repo_name_lower=${REPO_NAME_LOWER}" >> $GITHUB_OUTPUT
+          echo "full_repo_name=${FULL_REPO_NAME}" >> $GITHUB_OUTPUT
+          
           echo "Generated tags for ${COMPONENT}:"
           printf '%s\n' "${TAGS[@]}"
 
@@ -144,7 +150,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKER_USERNAME }}/${{ env.REPO_NAME }}
+          images: ${{ steps.tags.outputs.full_repo_name }}
           tags: |
             type=raw,value=${{ steps.tags.outputs.first_tag }}
           labels: |
@@ -172,7 +178,7 @@ jobs:
       - name: Update summary for ${{ matrix.component }}
         if: matrix.component == 'backend'
         run: |
-          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${{ env.REPO_NAME }}"
+          FULL_REPO_NAME="${{ steps.tags.outputs.full_repo_name }}"
           
           echo "## Docker Images Published 🚀" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -191,7 +197,7 @@ jobs:
 
       - name: Add component summary
         run: |
-          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${{ env.REPO_NAME }}"
+          FULL_REPO_NAME="${{ steps.tags.outputs.full_repo_name }}"
           COMPONENT="${{ matrix.component }}"
           
           echo "### ${COMPONENT^} Images Published" >> $GITHUB_STEP_SUMMARY
@@ -207,7 +213,9 @@ jobs:
     steps:
       - name: Complete summary
         run: |
-          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${{ env.REPO_NAME }}"
+          # 重新计算小写仓库名以确保一致性
+          REPO_NAME_LOWER=$(echo "${{ env.REPO_NAME }}" | tr '[:upper:]' '[:lower:]')
+          FULL_REPO_NAME="${{ env.DOCKER_USERNAME }}/${REPO_NAME_LOWER}"
           
           echo "### 使用示例" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
