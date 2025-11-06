@@ -2,8 +2,8 @@ name: 自动同步上游分支
 
 on:
   schedule:
-    # 每周一上午9点检查上游更新
-    - cron: '0 9 * * 1'
+    # 每分钟检查
+    - cron: '* * * * *'
   workflow_dispatch:
     # 允许手动触发
     inputs:
