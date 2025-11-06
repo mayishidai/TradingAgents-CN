@@ -17,7 +17,6 @@ env:
   # 同步的分支 - main、v1.0.0-preview
   SYNC_BRANCH : v1.0.0-preview
 
-
 jobs:
   check-upstream:
     runs-on: ubuntu-latest
@@ -108,93 +107,105 @@ jobs:
           echo "reason=常规更新" >> $GITHUB_OUTPUT
         fi
     
-    - name: 创建Issue报告
+    - name: 输出更新报告
       if: steps.check_updates.outputs.has_updates == 'true'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const newCommits = '${{ steps.check_updates.outputs.new_commits }}';
-          const recentCommits = `${{ steps.check_updates.outputs.recent_commits }}`;
-          const features = '${{ steps.analyze_updates.outputs.features }}';
-          const fixes = '${{ steps.analyze_updates.outputs.fixes }}';
-          const docs = '${{ steps.analyze_updates.outputs.docs }}';
-          const priority = '${{ steps.analyze_updates.outputs.priority }}';
-          const reason = '${{ steps.analyze_updates.outputs.reason }}';
-          const hasConflicts = '${{ steps.check_updates.outputs.has_conflicts }}' === 'true';
+      run: |
+        echo "📊 更新报告"
+        echo "新提交数量: ${{ steps.check_updates.outputs.new_commits }}"
+        echo "更新优先级: ${{ steps.analyze_updates.outputs.priority }}"
+        echo "优先级原因: ${{ steps.analyze_updates.outputs.reason }}"
+        echo "冲突状态: ${{ steps.check_updates.outputs.has_conflicts }}"
+        echo ""
+        echo "最近提交:"
+        echo "${{ steps.check_updates.outputs.recent_commits }}"
+    
+    # - name: 创建Issue报告
+    #   if: steps.check_updates.outputs.has_updates == 'true'
+    #   uses: actions/github-script@v7
+    #   with:
+    #     script: |
+    #       const newCommits = '${{ steps.check_updates.outputs.new_commits }}';
+    #       const recentCommits = `${{ steps.check_updates.outputs.recent_commits }}`;
+    #       const features = '${{ steps.analyze_updates.outputs.features }}';
+    #       const fixes = '${{ steps.analyze_updates.outputs.fixes }}';
+    #       const docs = '${{ steps.analyze_updates.outputs.docs }}';
+    #       const priority = '${{ steps.analyze_updates.outputs.priority }}';
+    #       const reason = '${{ steps.analyze_updates.outputs.reason }}';
+    #       const hasConflicts = '${{ steps.check_updates.outputs.has_conflicts }}' === 'true';
           
-          const issueTitle = `🔄 上游更新检测 - ${newCommits} 个新提交${hasConflicts ? ' ⚠️有冲突风险' : ''}`;
-          const issueBody = `
-          ## 📊 更新概览
+    #       const issueTitle = `🔄 上游更新检测 - ${newCommits} 个新提交${hasConflicts ? ' ⚠️有冲突风险' : ''}`;
+    #       const issueBody = `
+    #       ## 📊 更新概览
           
-          - **新提交数量**: ${newCommits}
-          - **更新优先级**: ${priority.toUpperCase()}
-          - **优先级原因**: ${reason}
-          - **冲突状态**: ${hasConflicts ? '⚠️ 检测到可能的冲突' : '✅ 无冲突'}
+    #       - **新提交数量**: ${newCommits}
+    #       - **更新优先级**: ${priority.toUpperCase()}
+    #       - **优先级原因**: ${reason}
+    #       - **冲突状态**: ${hasConflicts ? '⚠️ 检测到可能的冲突' : '✅ 无冲突'}
           
-          ## 📈 更新分析
+    #       ## 📈 更新分析
           
-          - 🆕 新功能: ${features} 个
-          - 🐛 Bug修复: ${fixes} 个  
-          - 📚 文档更新: ${docs} 个
+    #       - 🆕 新功能: ${features} 个
+    #       - 🐛 Bug修复: ${fixes} 个  
+    #       - 📚 文档更新: ${docs} 个
           
-          ## 📋 最近提交
+    #       ## 📋 最近提交
           
-          \`\`\`
-          ${recentCommits}
-          \`\`\`
+    #       \`\`\`
+    #       ${recentCommits}
+    #       \`\`\`
           
-          ## 🎯 建议行动
+    #       ## 🎯 建议行动
           
-          ${hasConflicts ? 
-            '⚠️ **检测到可能的冲突，需要手动处理**' :
-            priority === 'high' ? 
-            '⚠️ **建议立即同步** - 包含重要的Bug修复' : 
-            priority === 'medium' ? 
-            '📅 **建议本周内同步** - 包含有价值的新功能' : 
-            '📝 **可以计划同步** - 常规更新，可以安排时间同步'
-          }
+    #       ${hasConflicts ? 
+    #         '⚠️ **检测到可能的冲突，需要手动处理**' :
+    #         priority === 'high' ? 
+    #         '⚠️ **建议立即同步** - 包含重要的Bug修复' : 
+    #         priority === 'medium' ? 
+    #         '📅 **建议本周内同步** - 包含有价值的新功能' : 
+    #         '📝 **可以计划同步** - 常规更新，可以安排时间同步'
+    #       }
           
-          ## 🔧 同步选项
+    #       ## 🔧 同步选项
           
-          1. **自动同步** (仅限无冲突情况): 重新运行此 workflow 并选择"强制同步"
-          2. **手动同步**: 使用 git 命令手动合并
-          3. **使用 PR**: 创建同步分支并处理冲突
+    #       1. **自动同步** (仅限无冲突情况): 重新运行此 workflow 并选择"强制同步"
+    #       2. **手动同步**: 使用 git 命令手动合并
+    #       3. **使用 PR**: 创建同步分支并处理冲突
           
-          ## 📞 相关链接
+    #       ## 📞 相关链接
           
-          - [上游仓库](https://github.com/hsliuping/TradingAgents-CN)
-          - [同步策略文档](docs/maintenance/upstream-sync.md)
+    #       - [上游仓库](https://github.com/hsliuping/TradingAgents-CN)
+    #       - [同步策略文档](docs/maintenance/upstream-sync.md)
           
-          ---
+    #       ---
           
-          *此Issue由GitHub Actions自动创建于 ${new Date().toISOString()}*
-          `;
+    #       *此Issue由GitHub Actions自动创建于 ${new Date().toISOString()}*
+    #       `;
           
-          // 检查是否已有相似的Issue
-          const existingIssues = await github.rest.issues.listForRepo({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            state: 'open',
-            labels: 'upstream-sync'
-          });
+    #       // 检查是否已有相似的Issue
+    #       const existingIssues = await github.rest.issues.listForRepo({
+    #         owner: context.repo.owner,
+    #         repo: context.repo.repo,
+    #         state: 'open',
+    #         labels: 'upstream-sync'
+    #       });
           
-          const hasOpenSyncIssue = existingIssues.data.some(issue => 
-            issue.title.includes('上游更新检测')
-          );
+    #       const hasOpenSyncIssue = existingIssues.data.some(issue => 
+    #         issue.title.includes('上游更新检测')
+    #       );
           
-          if (!hasOpenSyncIssue) {
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: issueTitle,
-              body: issueBody,
-              labels: ['upstream-sync', priority === 'high' ? 'priority-high' : priority === 'medium' ? 'priority-medium' : 'priority-low', hasConflicts ? 'conflict' : 'no-conflict']
-            });
+    #       if (!hasOpenSyncIssue) {
+    #         await github.rest.issues.create({
+    #           owner: context.repo.owner,
+    #           repo: context.repo.repo,
+    #           title: issueTitle,
+    #           body: issueBody,
+    #           labels: ['upstream-sync', priority === 'high' ? 'priority-high' : priority === 'medium' ? 'priority-medium' : 'priority-low', hasConflicts ? 'conflict' : 'no-conflict']
+    #         });
             
-            console.log('✅ 已创建上游更新Issue');
-          } else {
-            console.log('ℹ️ 已存在开放的同步Issue，跳过创建');
-          }
+    #         console.log('✅ 已创建上游更新Issue');
+    #       } else {
+    #         console.log('ℹ️ 已存在开放的同步Issue，跳过创建');
+    #       }
 
   auto-sync:
     runs-on: ubuntu-latest
@@ -248,87 +259,110 @@ jobs:
         git push origin ${{ env.SYNC_BRANCH }}
         echo "✅ 更新已推送"
     
-    - name: 创建同步成功报告
+    - name: 输出同步成功报告
       if: steps.merge_upstream.outputs.merge_success == 'true'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const newCommits = '${{ needs.check-upstream.outputs.new_commits }}';
-          const priority = '${{ needs.check-upstream.outputs.priority }}';
-          
-          await github.rest.issues.create({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            title: '✅ 自动同步完成',
-            body: `
-            ## 🎉 自动同步成功
-            
-            **同步时间**: ${new Date().toISOString()}
-            **同步提交**: ${newCommits} 个新提交
-            **更新优先级**: ${priority.toUpperCase()}
-            **触发方式**: ${context.eventName === 'workflow_dispatch' ? '手动触发' : '自动触发'}
-            
-            ## 📋 同步详情
-            
-            已成功将上游仓库的更新合并到当前分支。
-            
-            ## 🔍 后续检查建议
-            
-            1. 验证功能是否正常
-            2. 运行测试套件
-            3. 检查相关文档
-            
-            ---
-            
-            *此报告由GitHub Actions自动生成*
-            `,
-            labels: ['upstream-sync', 'auto-sync', 'success']
-          });
+      run: |
+        echo "✅ 自动同步完成"
+        echo "同步时间: $(date)"
+        echo "同步提交: ${{ needs.check-upstream.outputs.new_commits }} 个新提交"
+        echo "更新优先级: ${{ needs.check-upstream.outputs.priority }}"
+        echo "触发方式: ${{ github.event_name == 'workflow_dispatch' && '手动触发' || '自动触发' }}"
     
-    - name: 处理合并冲突
-      if: steps.merge_upstream.outputs.merge_success == 'false'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const newCommits = '${{ needs.check-upstream.outputs.new_commits }}';
+    # - name: 创建同步成功报告
+    #   if: steps.merge_upstream.outputs.merge_success == 'true'
+    #   uses: actions/github-script@v7
+    #   with:
+    #     script: |
+    #       const newCommits = '${{ needs.check-upstream.outputs.new_commits }}';
+    #       const priority = '${{ needs.check-upstream.outputs.priority }}';
           
-          await github.rest.issues.create({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            title: '❌ 自动同步失败 - 存在冲突',
-            body: `
-            ## ⚠️ 自动同步失败
+    #       await github.rest.issues.create({
+    #         owner: context.repo.owner,
+    #         repo: context.repo.repo,
+    #         title: '✅ 自动同步完成',
+    #         body: `
+    #         ## 🎉 自动同步成功
             
-            **失败时间**: ${new Date().toISOString()}
-            **待同步提交**: ${newCommits} 个
-            **失败原因**: 检测到文件冲突，需要手动解决
+    #         **同步时间**: ${new Date().toISOString()}
+    #         **同步提交**: ${newCommits} 个新提交
+    #         **更新优先级**: ${priority.toUpperCase()}
+    #         **触发方式**: ${context.eventName === 'workflow_dispatch' ? '手动触发' : '自动触发'}
             
-            ## 🛠️ 解决步骤
+    #         ## 📋 同步详情
             
-            1. 手动运行: \`git merge upstream/${{ env.SYNC_BRANCH }}\`
-            2. 解决所有冲突文件
-            3. 提交更改: \`git commit -m "解决合并冲突"\`
-            4. 推送更新: \`git push origin ${{ env.SYNC_BRANCH }}\`
+    #         已成功将上游仓库的更新合并到当前分支。
             
-            ## 📞 相关命令
+    #         ## 🔍 后续检查建议
             
-            \`\`\`bash
-            # 查看冲突状态
-            git status
+    #         1. 验证功能是否正常
+    #         2. 运行测试套件
+    #         3. 检查相关文档
             
-            # 中止合并（如果需要重新开始）
-            git merge --abort
+    #         ---
             
-            # 手动合并
-            git merge upstream/${{ env.SYNC_BRANCH }}
-            \`\`\`
+    #         *此报告由GitHub Actions自动生成*
+    #         `,
+    #         labels: ['upstream-sync', 'auto-sync', 'success']
+    #       });
+
+    - name: 输出合并冲突报告
+      if: steps.merge_upstream.outputs.merge_success == 'false'
+      run: |
+        echo "❌ 自动同步失败 - 存在冲突"
+        echo "失败时间: $(date)"
+        echo "待同步提交: ${{ needs.check-upstream.outputs.new_commits }} 个"
+        echo "失败原因: 检测到文件冲突，需要手动解决"
+        echo ""
+        echo "解决步骤:"
+        echo "1. 手动运行: git merge upstream/${{ env.SYNC_BRANCH }}"
+        echo "2. 解决所有冲突文件"
+        echo "3. 提交更改: git commit -m \"解决合并冲突\""
+        echo "4. 推送更新: git push origin ${{ env.SYNC_BRANCH }}"
+
+    # - name: 处理合并冲突
+    #   if: steps.merge_upstream.outputs.merge_success == 'false'
+    #   uses: actions/github-script@v7
+    #   with:
+    #     script: |
+    #       const newCommits = '${{ needs.check-upstream.outputs.new_commits }}';
+          
+    #       await github.rest.issues.create({
+    #         owner: context.repo.owner,
+    #         repo: context.repo.repo,
+    #         title: '❌ 自动同步失败 - 存在冲突',
+    #         body: `
+    #         ## ⚠️ 自动同步失败
             
-            ---
+    #         **失败时间**: ${new Date().toISOString()}
+    #         **待同步提交**: ${newCommits} 个
+    #         **失败原因**: 检测到文件冲突，需要手动解决
             
-            *此报告由GitHub Actions自动生成*
-            `,
-            labels: ['upstream-sync', 'conflict', 'needs-attention']
-          });
+    #         ## 🛠️ 解决步骤
+            
+    #         1. 手动运行: \`git merge upstream/${{ env.SYNC_BRANCH }}\`
+    #         2. 解决所有冲突文件
+    #         3. 提交更改: \`git commit -m "解决合并冲突"\`
+    #         4. 推送更新: \`git push origin ${{ env.SYNC_BRANCH }}\`
+            
+    #         ## 📞 相关命令
+            
+    #         \`\`\`bash
+    #         # 查看冲突状态
+    #         git status
+            
+    #         # 中止合并（如果需要重新开始）
+    #         git merge --abort
+            
+    #         # 手动合并
+    #         git merge upstream/${{ env.SYNC_BRANCH }}
+    #         \`\`\`
+            
+    #         ---
+            
+    #         *此报告由GitHub Actions自动生成*
+    #         `,
+    #         labels: ['upstream-sync', 'conflict', 'needs-attention']
+    #       });
 
   # 新增：冲突手动处理工作流
   manual-conflict-resolution:
@@ -356,7 +390,9 @@ jobs:
       run: |
         git remote add upstream https://github.com/hsliuping/TradingAgents-CN.git
         git fetch upstream
-        git checkout -b sync/upstream-$(date +%Y%m%d-%H%M%S)
+        SYNC_BRANCH_NAME="sync/upstream-$(date +%Y%m%d-%H%M%S)"
+        git checkout -b $SYNC_BRANCH_NAME
+        echo "sync_branch_name=$SYNC_BRANCH_NAME" >> $GITHUB_OUTPUT
         git merge upstream/${{ env.SYNC_BRANCH }} || echo "合并存在冲突，请手动解决"
     
     - name: 显示冲突状态
@@ -365,35 +401,51 @@ jobs:
         echo "冲突状态:"
         git status
     
-    - name: 创建PR准备
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const branchName = await require('child_process').execSync('git branch --show-current').toString().trim();
+    # - name: 创建PR准备
+    #   uses: actions/github-script@v7
+    #   with:
+    #     script: |
+    #       const branchName = await require('child_process').execSync('git branch --show-current').toString().trim();
           
-          await github.rest.issues.create({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            title: `🔧 需要手动解决冲突 - 分支 ${branchName}`,
-            body: `
-            ## 🛠️ 冲突解决任务
+    #       await github.rest.issues.create({
+    #         owner: context.repo.owner,
+    #         repo: context.repo.repo,
+    #         title: `🔧 需要手动解决冲突 - 分支 ${branchName}`,
+    #         body: `
+    #         ## 🛠️ 冲突解决任务
             
-            已创建分支 **${branchName}** 用于处理上游同步冲突。
+    #         已创建分支 **${branchName}** 用于处理上游同步冲突。
             
-            ## 📋 下一步操作
+    #         ## 📋 下一步操作
             
-            1. 在本地拉取分支: \`git fetch origin && git checkout ${branchName}\`
-            2. 解决所有冲突文件
-            3. 提交更改: \`git add . && git commit -m "解决上游同步冲突"\`
-            4. 推送并创建PR: \`git push origin ${branchName}\`
+    #         1. 在本地拉取分支: \`git fetch origin && git checkout ${branchName}\`
+    #         2. 解决所有冲突文件
+    #         3. 提交更改: \`git add . && git commit -m "解决上游同步冲突"\`
+    #         4. 推送并创建PR: \`git push origin ${branchName}\`
             
-            ## 🔍 冲突文件
+    #         ## 🔍 冲突文件
             
-            请在本地查看具体冲突文件并进行解决。
+    #         请在本地查看具体冲突文件并进行解决。
             
-            ---
+    #         ---
             
-            *此任务由GitHub Actions自动创建*
-            `,
-            labels: ['upstream-sync', 'conflict', 'manual-resolution']
-          });
+    #         *此任务由GitHub Actions自动创建*
+    #         `,
+    #         labels: ['upstream-sync', 'conflict', 'manual-resolution']
+    #       });
+
+    - name: 推送同步分支
+      run: |
+        git push origin $(git branch --show-current)
+        echo "✅ 已推送同步分支: $(git branch --show-current)"
+    
+    - name: 输出手动解决指南
+      run: |
+        echo "🔧 需要手动解决冲突"
+        echo "已创建分支 $(git branch --show-current) 用于处理上游同步冲突。"
+        echo ""
+        echo "下一步操作:"
+        echo "1. 在本地拉取分支: git fetch origin && git checkout $(git branch --show-current)"
+        echo "2. 解决所有冲突文件"
+        echo "3. 提交更改: git add . && git commit -m \"解决上游同步冲突\""
+        echo "4. 推送并创建PR: git push origin $(git branch --show_current)"
