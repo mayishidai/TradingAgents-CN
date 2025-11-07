@@ -464,3 +464,11 @@ jobs:
         echo "2. 解决所有冲突文件"
         echo "3. 提交更改: git add . && git commit -m \"解决上游同步冲突\""
         echo "4. 推送并创建PR: git push origin ${{ steps.create_branch.outputs.sync_branch_name }}"
+
+    - name: 触发 Docker 构建
+      if: success()
+      uses: benc-uk/workflow-dispatch@v1
+      with:
+        workflow: 自动构建Docker并提交  # 您构建工作流的名称
+        token: ${{ secrets.GITHUB_TOKEN }}  # 可使用 PAT_TOKEN
+        ref: ${{ github.ref }}
