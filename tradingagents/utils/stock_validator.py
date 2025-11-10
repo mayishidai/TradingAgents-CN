@@ -425,7 +425,10 @@ class StockDataPreparer:
 
         # 标准化港股代码格式
         if not stock_code.upper().endswith('.HK'):
-            formatted_code = f"{stock_code.zfill(4)}.HK"
+            # 移除前导0，然后补齐到4位
+            clean_code = stock_code.lstrip('0') or '0'  # 如果全是0，保留一个0
+            formatted_code = f"{clean_code.zfill(4)}.HK"
+            logger.debug(f"🔍 [港股数据] 代码格式化: {stock_code} → {formatted_code}")
         else:
             formatted_code = stock_code.upper()
 
@@ -434,6 +437,8 @@ class StockDataPreparer:
         start_date = end_date - timedelta(days=period_days)
         start_date_str = start_date.strftime('%Y-%m-%d')
         end_date_str = end_date.strftime('%Y-%m-%d')
+
+        logger.debug(f"📅 [港股数据] 日期范围: {start_date_str} → {end_date_str}")
 
         has_historical_data = False
         has_basic_info = False
@@ -600,6 +605,8 @@ class StockDataPreparer:
         start_date_str = start_date.strftime('%Y-%m-%d')
         end_date_str = end_date.strftime('%Y-%m-%d')
 
+        logger.debug(f"📅 [美股数据] 日期范围: {start_date_str} → {end_date_str}")
+
         has_historical_data = False
         has_basic_info = False
         stock_name = formatted_code  # 美股通常使用代码作为名称
@@ -608,13 +615,23 @@ class StockDataPreparer:
         try:
             # 1. 获取历史数据（美股通常直接通过历史数据验证股票是否存在）
             logger.debug(f"📊 [美股数据] 获取{formatted_code}历史数据 ({start_date_str} 到 {end_date_str})...")
-            from tradingagents.dataflows.optimized_us_data import get_us_stock_data_cached
 
-            historical_data = get_us_stock_data_cached(
-                formatted_code,
-                start_date_str,
-                end_date_str
-            )
+            # 导入美股数据提供器（支持新旧路径）
+            try:
+                from tradingagents.dataflows.providers.us import OptimizedUSDataProvider
+                provider = OptimizedUSDataProvider()
+                historical_data = provider.get_stock_data(
+                    formatted_code,
+                    start_date_str,
+                    end_date_str
+                )
+            except ImportError:
+                from tradingagents.dataflows.providers.us.optimized import get_us_stock_data_cached
+                historical_data = get_us_stock_data_cached(
+                    formatted_code,
+                    start_date_str,
+                    end_date_str
+                )
 
             if historical_data and "❌" not in historical_data and "错误" not in historical_data and "无法获取" not in historical_data:
                 # 更宽松的数据有效性检查

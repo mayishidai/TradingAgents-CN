@@ -5,13 +5,15 @@ MongoDB存储适配器
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Dict, List, Optional, Any
 from dataclasses import asdict
 from .config_manager import UsageRecord
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
+from tradingagents.config.runtime_settings import get_timezone_name
 logger = get_logger('agents')
 
 try:
@@ -54,9 +56,17 @@ class MongoDBStorage:
     def _connect(self):
         """连接到MongoDB"""
         try:
+            # 从环境变量读取超时配置，使用合理的默认值
+            import os
+            connect_timeout = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "30000"))
+            socket_timeout = int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "60000"))
+            server_selection_timeout = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
+
             self.client = MongoClient(
                 self.connection_string,
-                serverSelectionTimeoutMS=5000  # 5秒超时
+                serverSelectionTimeoutMS=server_selection_timeout,
+                connectTimeoutMS=connect_timeout,
+                socketTimeoutMS=socket_timeout
             )
             # 测试连接
             self.client.admin.command('ping')
@@ -111,7 +121,7 @@ class MongoDBStorage:
             record_dict = asdict(record)
             
             # 添加MongoDB特有的字段
-            record_dict['_created_at'] = datetime.now()
+            record_dict['_created_at'] = datetime.now(ZoneInfo(get_timezone_name()))
             
             # 插入记录
             result = self.collection.insert_one(record_dict)
@@ -136,7 +146,7 @@ class MongoDBStorage:
             query = {}
             if days:
                 from datetime import timedelta
-                cutoff_date = datetime.now() - timedelta(days=days)
+                cutoff_date = datetime.now(ZoneInfo(get_timezone_name())) - timedelta(days=days)
                 query['timestamp'] = {'$gte': cutoff_date.isoformat()}
             
             # 查询记录，按时间倒序
